@@ -1,0 +1,16 @@
+{
+  "name": "aretalents-job-fetch-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "setup": "node src/setupCli.js",
+    "start": "node src/cli.js",
+    "push": "node src/pushCli.js",
+    "test": "node --test --experimental-test-coverage --test-coverage-include=src/**",
+    "threads": "node src/threadsCli.js"
+  }
+}
