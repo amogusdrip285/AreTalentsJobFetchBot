@@ -12,12 +12,14 @@ const LEDGER_PATH = fileURLToPath(new URL("../data/pushed.json", import.meta.url
 const PUBLISHED_PATH = fileURLToPath(new URL("../data/published.json", import.meta.url));
 const MIN_DELAY_MS = 200;
 
-const FLAGS = ["dry-run", "publish", "id", "assign", "work-mode", "delay", "in"];
+const FLAGS = ["dry-run", "publish", "republish", "id", "assign", "work-mode", "delay", "in"];
 
 const USAGE = `Usage: node src/pushCli.js [options]
 
   --dry-run            Show what would happen, send nothing
   --publish            Also publish to the public job board
+  --republish          Publish already-published jobs again to update their
+                       public page (salary, JD, tags). Implies --publish
   --id <aniday id>     Only this job (repeatable)
   --assign <id=ROLE>   Set a job's role family by hand (repeatable)
                        ROLE is ${ROLE_FAMILIES.join(", ")}
@@ -42,6 +44,7 @@ const readOptions = () => {
     options: {
       "dry-run": { type: "boolean", default: false },
       publish: { type: "boolean", default: false },
+      republish: { type: "boolean", default: false },
       id: { type: "string", multiple: true, default: [] },
       assign: { type: "string", multiple: true, default: [] },
       "work-mode": { type: "string", multiple: true, default: [] },
@@ -53,7 +56,8 @@ const readOptions = () => {
   return {
     help: values.help,
     dryRun: values["dry-run"],
-    shouldPublish: values.publish,
+    shouldPublish: values.publish || values.republish,
+    republish: values.republish,
     ids: values.id,
     assignments: Object.fromEntries(values.assign.map((text) => parsePair(text, ROLE_FAMILIES, "--assign 16464=DEVELOPER"))),
     workModes: Object.fromEntries(values["work-mode"].map((text) => parsePair(text, WORK_MODES, "--work-mode 16464=Hybrid"))),

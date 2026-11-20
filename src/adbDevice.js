@@ -2,12 +2,14 @@ import { execFile } from "node:child_process";
 import { Socket } from "node:net";
 import { networkInterfaces } from "node:os";
 import { promisify } from "node:util";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 
 const run = promisify(execFile);
 const ADB_TIMEOUT_MS = 60_000;
 const ADB_PORT = 5555;
 const PROBE_TIMEOUT_MS = 1_500;
-const UI_DUMP_PATH = "/data/local/tmp/threads_bot_ui.xml";
+const UI_DUMP_PATH = "/data/local/tmp/bot_ui.xml";
 const POLL_INTERVAL_MS = 700;
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -25,7 +27,7 @@ const attribute = (tag, name) => {
 };
 
 /**
- * @typedef {{ text: string, id: string, desc: string, className: string, clickable: boolean,
+ * @typedef {{ text: string, id: string, desc: string, className: string, clickable: boolean, checked: boolean,
  *   bounds: { left: number, top: number, right: number, bottom: number } }} UiNode
  */
 
@@ -44,6 +46,7 @@ export function parseUiNodes(xml) {
       desc: attribute(tag, "content-desc"),
       className: attribute(tag, "class"),
       clickable: attribute(tag, "clickable") === "true",
+      checked: attribute(tag, "checked") === "true",
       bounds: { left, top, right, bottom },
     };
   });
@@ -104,8 +107,17 @@ export function createAdb({ serial, adbPath = "adb" }) {
     await shell(`input tap ${x} ${y}`);
   };
 
+  const screenshot = async (path) => {
+    const { stdout } = await run(adbPath, ["-s", serial, "exec-out", "screencap", "-p"], {
+      timeout: ADB_TIMEOUT_MS, windowsHide: true, maxBuffer: 64 * 1024 * 1024, encoding: "buffer",
+    });
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, stdout);
+  };
+
   return {
     serial,
+    screenshot,
     exec,
     shell,
     push: (local, remote) => exec(["push", local, remote]),

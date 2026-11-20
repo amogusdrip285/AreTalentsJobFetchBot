@@ -1,34 +1,37 @@
 #!/usr/bin/env node
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { connectDevice, createAdb, discoverDevices, sleep } from "./adbDevice.js";
 import { assertFlagsArrived, intAtLeast, loadEnv, print, runMain, writeJsonFile } from "./cliSupport.js";
 import { renderCards } from "./jobCard.js";
-import { postToThreads } from "./threadsBot.js";
 import { buildCardSpec, buildPostText } from "./threadsPost.js";
+import { accountFile, openThreads, sleep } from "./threadsWeb.js";
 
 const dataPath = (name) => fileURLToPath(new URL(`../data/${name}`, import.meta.url));
 const JOBS_PATH = dataPath("jobs.json");
 const PUBLISHED_PATH = dataPath("published.json");
-const LEDGER_PATH = dataPath("threadsPosted.json");
 const OUT_DIR = dataPath("threads");
+const COMPOSE_DIR = `${OUT_DIR}/compose`;
+// One ledger per account, so a new account posts every job again.
+const ledgerPath = (username) => accountFile(OUT_DIR, "posted", username);
 const MINUTE_MS = 60_000;
+const BROWSERS = ["chrome", "msedge"];
 
-const FLAGS = ["dry-run", "compose-only", "id", "limit", "device", "account", "min-gap", "max-gap", "no-image"];
+const FLAGS = ["dry-run", "compose-only", "id", "limit", "headed", "browser", "min-gap", "max-gap", "no-image"];
 
 const USAGE = `Usage: node src/threadsCli.js [options]
 
-Posts every job that is live on AreTalents to Threads, one post per job, from an
-Android phone with ADB over Wi-Fi switched on and Threads signed in.
+Posts every job that is live on AreTalents to Threads, one post per job, from a
+browser that logs in as THREADS_USERNAME with THREADS_PASSWORD (both in .env).
 
-  --dry-run          Write the posts and images to data/threads/ only; no phone needed
-  --compose-only     Open each post in Threads and check it, but don't post it
+  --dry-run          Write the posts and images to data/threads/ only; doesn't open Threads
+  --compose-only     Log in and fill in each post, but don't post it. Saves a screenshot
+                     of each to data/threads/compose/
   --id <aniday id>   Only this job (repeatable)
   --limit <n>        Post at most n jobs this run
-  --device <ip:port> The phone (default: THREADS_ADB_DEVICE, or scan the local network)
-  --account <name>   Threads username that must be signed in (default: THREADS_ACCOUNT)
+  --headed           Show the browser window, to finish a login check by hand
+  --browser <name>   ${BROWSERS.join(" or ")}, as installed on this computer (default: chrome)
   --min-gap <min>    Shortest pause between posts in minutes (default: 4)
   --max-gap <min>    Longest pause between posts in minutes (default: 9)
   --no-image         Post text only, without the image card
@@ -42,14 +45,15 @@ const readOptions = () => {
       "compose-only": { type: "boolean", default: false },
       id: { type: "string", multiple: true, default: [] },
       limit: { type: "string" },
-      device: { type: "string" },
-      account: { type: "string" },
+      headed: { type: "boolean", default: false },
+      browser: { type: "string", default: "chrome" },
       "min-gap": { type: "string", default: "4" },
       "max-gap": { type: "string", default: "9" },
       "no-image": { type: "boolean", default: false },
       help: { type: "boolean", default: false },
     },
   });
+  if (!BROWSERS.includes(values.browser)) throw new Error(`--browser must be one of ${BROWSERS.join(", ")}`);
   const minGap = intAtLeast(values["min-gap"], "min-gap", 1);
   const maxGap = intAtLeast(values["max-gap"], "max-gap", minGap);
   return {
@@ -58,8 +62,10 @@ const readOptions = () => {
     composeOnly: values["compose-only"],
     ids: values.id,
     limit: values.limit === undefined ? Infinity : intAtLeast(values.limit, "limit", 1),
-    device: values.device ?? process.env.THREADS_ADB_DEVICE,
-    account: values.account ?? process.env.THREADS_ACCOUNT,
+    headed: values.headed,
+    browser: values.browser,
+    username: process.env.THREADS_USERNAME?.trim().replace(/^@/, "") || undefined,
+    password: process.env.THREADS_PASSWORD || undefined,
     gapMs: [minGap * MINUTE_MS, maxGap * MINUTE_MS],
     withImage: !values["no-image"],
   };
@@ -74,19 +80,6 @@ const selectJobs = (jobs, published, ledger, { ids, limit }) => jobs
   .sort((a, b) => b.id - a.id)
   .slice(0, limit);
 
-const resolveDevice = async (device) => {
-  if (device) return device;
-  print("No --device given, so scanning the local network for ADB on port 5555...");
-  const found = await discoverDevices();
-  if (found.length !== 1) {
-    throw new Error(found.length
-      ? `Found several devices (${found.join(", ")}). Pick one with --device.`
-      : "No device with ADB over Wi-Fi found. Switch it on, or pass --device <ip:port>.");
-  }
-  print(`Found ${found[0]}`);
-  return found[0];
-};
-
 const writePreview = async (posts) => {
   const body = posts.map(({ job, text, imagePath }) => [
     `## ${job.id} · ${job.title}`, "", "```text", text, "```", "", imagePath ? `![card](${imagePath})` : "", "",
@@ -98,19 +91,22 @@ const writePreview = async (posts) => {
 
 const randomGap = ([min, max]) => min + Math.floor(Math.random() * (max - min + 1));
 
-const runPosts = async (adb, posts, ledger, options) => {
+const runPosts = async (threads, posts, ledger, options) => {
+  const path = ledgerPath(options.username);
   let current = ledger;
   for (const [index, { job, text, imagePath, url }] of posts.entries()) {
     const label = `${job.id}  ${job.title}`;
     try {
-      const outcome = await postToThreads(adb, { text, imagePath, account: options.account, submit: !options.composeOnly });
+      const outcome = await threads.post({
+        text, imagePath, submit: !options.composeOnly, screenshotPath: `${COMPOSE_DIR}/job-${job.id}.png`,
+      });
       print(`${outcome.padEnd(10)} ${label}`);
       if (outcome === "posted") {
         current = { ...current, [job.id]: { postedAt: new Date().toISOString(), url } };
-        await writeJsonFile(LEDGER_PATH, current);
+        await writeJsonFile(path, current);
       }
     } catch (error) {
-      // If Post was tapped but the composer didn't close in time, the post may be live, so the
+      // If Post was clicked but the composer didn't close in time, the post may be live, so the
       // batch stops for a person to check rather than risk a duplicate.
       throw new Error(`failed     ${label}: ${error.message}\nStopped. Check the Threads profile, then run again to continue.`);
     }
@@ -128,16 +124,17 @@ const main = async () => {
   loadEnv();
   const options = readOptions();
   if (options.help) return print(USAGE);
-  if (!options.dryRun && !options.account) throw new Error("Set THREADS_ACCOUNT in .env or pass --account <username>");
+  if (!options.dryRun && !options.username) throw new Error("Set THREADS_USERNAME and THREADS_PASSWORD in .env");
 
   const { jobs } = await readJson(JOBS_PATH, { jobs: [] });
   const published = await readJson(PUBLISHED_PATH, {});
-  const ledger = await readJson(LEDGER_PATH, {});
+  // A dry run has no account, so it previews every published job.
+  const ledger = options.username ? await readJson(ledgerPath(options.username), {}) : {};
   const selected = selectJobs(jobs, published, ledger, options);
-  if (!selected.length) return print("Nothing to post: every published job is already in data/threadsPosted.json.");
+  if (!selected.length) return print(`Nothing to post: ${options.username} has already posted every published job.`);
 
   const images = options.withImage
-    ? await renderCards(selected.map(buildCardSpec), `${OUT_DIR}/cards`, options.account ?? "")
+    ? await renderCards(selected.map(buildCardSpec), `${OUT_DIR}/cards`, options.username ?? "")
     : {};
   const posts = selected.map((job) => ({
     job,
@@ -149,10 +146,21 @@ const main = async () => {
 
   if (options.dryRun) return print(`Preview written to ${await writePreview(posts)}`);
 
-  const serial = await resolveDevice(options.device);
-  await connectDevice(serial, process.env.ADB_PATH);
-  await runPosts(createAdb({ serial, adbPath: process.env.ADB_PATH }), posts, ledger, options);
-  print("Done.");
+  if (options.composeOnly) await mkdir(COMPOSE_DIR, { recursive: true });
+  print(`Opening Threads as ${options.username}...`);
+  const threads = await openThreads({
+    username: options.username,
+    password: options.password,
+    sessionFile: accountFile(OUT_DIR, "session", options.username),
+    headed: options.headed,
+    channel: options.browser,
+  });
+  try {
+    await runPosts(threads, posts, ledger, options);
+  } finally {
+    await threads.close();
+  }
+  return print("Done.");
 };
 
 runMain(main);

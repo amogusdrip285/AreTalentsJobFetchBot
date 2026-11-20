@@ -196,6 +196,32 @@ test("never republishes a job in the published ledger", async () => {
   assert.equal(result.publicUrl, "https://example.test/x");
 });
 
+test("republishes a job in the published ledger when asked, without creating it again", async () => {
+  const client = publishingClient();
+  const published = { 1: { publicId: "pub-1", url: "https://example.test/x" } };
+
+  const [result] = await pushJobs(client, [{ ...job(1), referralBonusVnd: 30000000 }], {
+    ...publishing, pushed: { 1: "at-old" }, published, republish: true,
+  });
+
+  assert.equal(client.calls.length, 0);
+  assert.equal(client.publishCalls[0].id, "at-old");
+  assert.equal(client.publishCalls[0].body.salary_min, 30);
+  assert.equal(result.outcome, "published");
+});
+
+test("a republish dry run sends nothing", async () => {
+  const client = publishingClient();
+  const published = { 1: { publicId: "pub-1", url: "https://example.test/x" } };
+
+  const [result] = await pushJobs(client, [job(1)], {
+    ...publishing, pushed: { 1: "at-old" }, published, republish: true, dryRun: true,
+  });
+
+  assert.equal(client.publishCalls.length, 0);
+  assert.equal(result.outcome, "would-publish");
+});
+
 test("a work mode set by hand overrides the inferred one", async () => {
   const client = publishingClient();
 

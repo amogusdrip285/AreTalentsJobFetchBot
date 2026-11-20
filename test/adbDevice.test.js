@@ -1,29 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { center, localSubnets, parseUiNodes } from "../src/adbDevice.js";
-import { buildShareCommand, lineBreakMoves, shellQuote } from "../src/threadsBot.js";
-
-test("quotes single quotes for sh", () => {
-  assert.equal(shellQuote("it's"), "'it'\\''s'");
-});
-
-test("the share command targets Threads and carries the text", () => {
-  const command = buildShareCommand("Xin chào\nit's me");
-  assert.match(command, /^am start -a android\.intent\.action\.SEND -t text\/plain/);
-  assert.match(command, /-n com\.instagram\.barcelona\/\.handleractivity\.BarcelonaShareHandlerActivity/);
-  assert.ok(command.endsWith(`--es android.intent.extra.TEXT 'Xin chào\nit'\\''s me'`));
-  assert.doesNotMatch(command, / -W /);
-});
-
-test("line breaks are restored last first, counting graphemes", () => {
-  // "ab\ncd\n\n👉e" is 9 graphemes with breaks at 2, 5 and 6; the emoji counts as one press.
-  // Each swap leaves the cursor just after the new line break.
-  assert.deepEqual(lineBreakMoves("ab\ncd\n\n👉e"), [2, 1, 3]);
-});
-
-test("text without line breaks needs no moves", () => {
-  assert.deepEqual(lineBreakMoves("one line"), []);
-});
 
 const DUMP = `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation="0">
 <node index="0" text="&#128640; A &amp; B&#10;C" resource-id="new_thread_screen_composer" class="android.widget.EditText" content-desc="" clickable="true" bounds="[158,301][1038,406]" />
@@ -38,6 +15,7 @@ test("parses uiautomator nodes and decodes entities", () => {
     desc: "",
     className: "android.widget.EditText",
     clickable: true,
+    checked: false,
     bounds: { left: 158, top: 301, right: 1038, bottom: 406 },
   });
   assert.equal(root.id, "action_bar_root");

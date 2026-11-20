@@ -11,6 +11,10 @@
     "start": "node src/cli.js",
     "push": "node src/pushCli.js",
     "test": "node --test --experimental-test-coverage --test-coverage-include=src/**",
-    "threads": "node src/threadsCli.js"
+    "threads": "node src/threadsCli.js",
+    "facebook": "node src/facebookCli.js"
+  },
+  "dependencies": {
+    "playwright-core": "1.65.0"
   }
 }

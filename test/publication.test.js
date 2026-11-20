@@ -38,6 +38,8 @@ test("maps a job to the publish body", () => {
     company: "Acme",
     location: "Ho Chi Minh, Ha Noi",
     work_mode: "Hybrid",
+    salary_min: 25,
+    salary_max: 25,
     tags: ["Java", "AWS"],
     requirements: "- 5 years of Java",
     preferred: "- Kafka",
@@ -45,12 +47,27 @@ test("maps a job to the publish body", () => {
   });
 });
 
-test("never sends the referral bonus or an invented salary", () => {
-  const body = toPublication(job(), "Onsite");
+test("sets the monthly salary to the referral bonus, in million VND", () => {
+  const body = toPublication(job({ referralBonusVnd: 37000000 }), "Onsite");
 
-  assert.equal("salary_min" in body, false);
-  assert.equal("salary_max" in body, false);
-  assert.equal(JSON.stringify(body).includes("25000000"), false);
+  assert.equal(body.salary_min, 37);
+  assert.equal(body.salary_max, 37);
+});
+
+test("rounds the referral bonus to the nearest million", () => {
+  const body = toPublication(job({ referralBonusVnd: 12600000 }), "Onsite");
+
+  assert.equal(body.salary_min, 13);
+  assert.equal(body.salary_max, 13);
+});
+
+test("leaves the salary out when there is no usable referral bonus", () => {
+  for (const referralBonusVnd of [null, undefined, 0, 400000, -5000000, "30000000"]) {
+    const body = toPublication(job({ referralBonusVnd }), "Onsite");
+
+    assert.equal("salary_min" in body, false, String(referralBonusVnd));
+    assert.equal("salary_max" in body, false, String(referralBonusVnd));
+  }
 });
 
 test("leaves out empty optional sections", () => {

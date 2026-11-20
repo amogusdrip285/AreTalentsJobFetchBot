@@ -3,6 +3,7 @@ import { classifyRoleFamily } from "./roleFamily.js";
 export const WORK_MODES = ["Remote", "Hybrid", "Onsite"];
 const MAX_TAGS = 20;
 const MAX_TAG_LENGTH = 50;
+const VND_PER_MILLION = 1_000_000;
 const REMOTE_LOCATION = "remote";
 // "Hybrid" alone is no use: JDs also say hybrid cloud, hybrid retrieval and hybrid models.
 const HYBRID_PATTERN = /\bhybrid[ -](work|working|schedule|arrangement)/i;
@@ -39,6 +40,20 @@ export function inferCategory(job) {
 
 const optional = (field, value) => (value ? { [field]: value } : {});
 
+/**
+ * The monthly salary shown on the public page is set to about the referral bonus,
+ * rounded to the nearest million VND as AreTalents expects.
+ * @param {Record<string, any>} job record from data/jobs.json
+ * @returns {{ salary_min: number, salary_max: number } | {}} empty when there is no usable bonus,
+ *   so the page shows the salary as negotiable
+ */
+export function toSalary(job) {
+  const bonus = job.referralBonusVnd;
+  if (typeof bonus !== "number" || !Number.isFinite(bonus)) return {};
+  const millions = Math.round(bonus / VND_PER_MILLION);
+  return millions >= 1 ? { salary_min: millions, salary_max: millions } : {};
+}
+
 // The public page renders **bold** and "- " lists, but shows # headings as literal text.
 const tidy = (text) => text
   .replace(/^[ \t]*#{1,6}[ \t]+(.+?)[ \t]*$/gm, "**$1**")
@@ -60,8 +75,8 @@ export function toPublicMarkdown(job) {
 }
 
 /**
- * Salary is left out because AniDay gives none, and the referral bonus because it is
- * headhunter commission. The deadline falls back to the AreTalents default of 30 days.
+ * The salary comes from the referral bonus (see toSalary). The deadline falls back to
+ * the AreTalents default of 30 days.
  * @param {Record<string, any>} job record from data/jobs.json
  * @param {string} workMode one of WORK_MODES
  * @returns {Record<string, unknown>} body for POST /api/v1/jobs/{id}/publish
@@ -75,6 +90,7 @@ export function toPublication(job, workMode) {
     company: job.company.name,
     location: job.locations.join(", "),
     work_mode: workMode,
+    ...toSalary(job),
     ...optional("category_slug", inferCategory(job)),
     tags: job.skills.filter((skill) => skill.length <= MAX_TAG_LENGTH).slice(0, MAX_TAGS),
     ...optional("requirements", job.requirements && tidy(job.requirements)),

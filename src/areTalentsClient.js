@@ -31,7 +31,7 @@ const formatFacts = (job) => [
 ].join("\n\n");
 
 /**
- * Referral bonus is left out: it is headhunter commission, not part of the JD.
+ * Referral bonus is left out of the JD. Publishing uses it for the salary (see toSalary).
  * @param {Record<string, any>} job record from data/jobs.json
  * @param {string} roleFamily
  * @param {string} accountRef opaque AniDay account reference, never a credential

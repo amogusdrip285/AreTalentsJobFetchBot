@@ -19,10 +19,10 @@ const findPublishProblem = (job, workMode) => {
   }
 };
 
-const planJob = (job, { pushed, published, assignments, workModes, dryRun, shouldPublish }) => {
+const planJob = (job, { pushed, published, assignments, workModes, dryRun, shouldPublish, republish }) => {
   const base = { id: job.id, title: job.title };
   const areTalentsId = pushed[job.id];
-  if (published[job.id]) {
+  if (published[job.id] && !(republish && areTalentsId)) {
     return { ...base, outcome: "already-published", areTalentsId, publicUrl: published[job.id].url };
   }
   if (areTalentsId && !shouldPublish) return { ...base, outcome: "already-pushed", areTalentsId };
@@ -87,6 +87,7 @@ const publishJob = async (client, job, plan, pace) => {
  *   workModes?: Record<string, string>,
  *   dryRun?: boolean,
  *   shouldPublish?: boolean,
+ *   republish?: boolean, publish jobs in `published` again, to update their public page
  *   delayMs?: number,
  *   sleep?: (ms: number) => Promise<void>,
  *   onCreated?: (result: Record<string, any>) => void | Promise<void>,
@@ -103,6 +104,7 @@ export async function pushJobs(client, jobs, {
   workModes = {},
   dryRun = false,
   shouldPublish = false,
+  republish = false,
   delayMs = 1000,
   sleep = realSleep,
   onCreated = () => {},
@@ -130,7 +132,7 @@ export async function pushJobs(client, jobs, {
   };
 
   for (const job of jobs) {
-    const plan = planJob(job, { pushed, published, assignments, workModes, dryRun, shouldPublish });
+    const plan = planJob(job, { pushed, published, assignments, workModes, dryRun, shouldPublish, republish });
     let result = plan;
     if (plan.outcome === "ready" && isStopped) {
       result = { ...plan, outcome: "not-attempted" };
